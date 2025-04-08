@@ -1,3 +1,3 @@
 #!/bin/bash
 
-. /opt/img/effdl-venv/bin/activate
+tmux attach-session -t lab1 || tmux new-session -s lab1

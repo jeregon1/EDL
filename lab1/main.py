@@ -1,3 +1,4 @@
+import os
 from torchvision.datasets import CIFAR10
 import numpy as np
 import torchvision.transforms as transforms
@@ -65,7 +66,8 @@ transform_test = transforms.Compose([
 
 ### The data from CIFAR10 are already downloaded in the following folder
 rootdir = '/opt/img/effdl-cifar10/'
-# rootdir = './effdl-cifar10/'
+if not os.path.exists(rootdir):
+    rootdir = './effdl-cifar10/'
 
 c10train = CIFAR10(rootdir,train=True,download=True,transform=transform_train)
 c10test = CIFAR10(rootdir,train=False,download=True,transform=transform_test)
@@ -110,10 +112,7 @@ def evaluate(net, dataloader):
     acc = 100. * correct / total
     return test_loss / len(dataloader), acc
 
-
-
-
-# Trainning
+# Training
 
 # Une boucle simple d'entraînement
 def train(net, trainloader, testloader, optimizer, scheduler, epochs=10):
