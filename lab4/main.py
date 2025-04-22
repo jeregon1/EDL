@@ -15,7 +15,6 @@ import torchvision.transforms as transforms
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
-import copy
 import torch.nn.utils.prune as prune
 
 class BasicBlock(nn.Module):
@@ -123,31 +122,33 @@ def ResNet101():
 def ResNet152():
     return ResNet(Bottleneck, [3, 8, 36, 3])
 
-# CIFAR10 data loading and preprocessing
-normalize_scratch = transforms.Normalize(
-    (0.4914, 0.4822, 0.4465),
-    (0.2023, 0.1994, 0.2010)
-)
-transform_train = transforms.Compose([
-    transforms.RandomCrop(32, padding=4),
-    transforms.RandomHorizontalFlip(),
-    transforms.ToTensor(),
-    normalize_scratch,
-])
-transform_test = transforms.Compose([
-    transforms.ToTensor(),
-    normalize_scratch,
-])
+def load_dataset():
+    # CIFAR10 data loading and preprocessing
+    normalize_scratch = transforms.Normalize(
+        (0.4914, 0.4822, 0.4465),
+        (0.2023, 0.1994, 0.2010)
+    )
+    transform_train = transforms.Compose([
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        normalize_scratch,
+    ])
+    transform_test = transforms.Compose([
+        transforms.ToTensor(),
+        normalize_scratch,
+    ])
 
-rootdir = '/opt/img/effdl-cifar10/'
-import os
-if not os.path.exists(rootdir):
-    rootdir = './effdl-cifar10/'
+    rootdir = '/opt/img/effdl-cifar10/'
+    import os
+    if not os.path.exists(rootdir):
+        rootdir = './effdl-cifar10/'
 
-c10train = torchvision.datasets.CIFAR10(rootdir, train=True, download=True, transform=transform_train)
-c10test = torchvision.datasets.CIFAR10(rootdir, train=False, download=True, transform=transform_test)
-trainloader = DataLoader(c10train, batch_size=32, shuffle=True)
-testloader = DataLoader(c10test, batch_size=32)
+    c10train = torchvision.datasets.CIFAR10(rootdir, train=True, download=True, transform=transform_train)
+    c10test = torchvision.datasets.CIFAR10(rootdir, train=False, download=True, transform=transform_test)
+    trainloader = DataLoader(c10train, batch_size=32, shuffle=True)
+    testloader = DataLoader(c10test, batch_size=32)
+    return trainloader, testloader
 
 def evaluate(net, dataloader, device):
     net.eval()
@@ -189,6 +190,7 @@ def train(model, trainloader, testloader, optimizer, scheduler, device, epochs=1
         scheduler.step()
 
 def prune_and_evaluate(model, dataloader, device, ratios):
+    import copy
     for amount in ratios:
         pruned_model = copy.deepcopy(model)
         parameters_to_prune = [(m, 'weight') for m in pruned_model.modules() if isinstance(m, (nn.Conv2d, nn.Linear))]
@@ -201,14 +203,14 @@ def save_model(model, path):
     torch.save(model.state_dict(), path)
     print(f"Model saved to {path}")
 
-from thop import profile
 
-def compute_score(model, input_size=(1,3,32,32)):
+def compute_score(model, input_size=(1,3,32,32), q_w=None, q_a=None):
     """Auto-compute efficiency score: parameters, MACs, bitwidths, pruning ratios."""
     # total weights and unstructured pruning ratio
     w = sum(p.numel() for p in model.parameters())
     zero_w = sum(int((p == 0).sum()) for p in model.parameters())
     p_u = zero_w / w
+
     # structured pruning ratio: fraction of completely zeroed filters/neurons
     total_filters, zero_filters = 0, 0
     for m in model.modules():
@@ -219,31 +221,60 @@ def compute_score(model, input_size=(1,3,32,32)):
             zero_filters += (sums == 0).sum().item()
             total_filters += sums.numel()
     p_s = zero_filters / total_filters if total_filters>0 else 0
+
     # bitwidth from dtype
     bits = torch.finfo(next(model.parameters()).dtype).bits
-    q_w = q_a = bits
+    if q_w is None:
+        q_w = bits
+    if q_a is None:
+        q_a = bits
+
     # compute MACs
+    from thop import profile
     if profile is None:
         raise ImportError("thop not installed, cannot compute flops automatically")
-    dummy = torch.randn(input_size).to(next(model.parameters()).device)
+    dummy = torch.randn(input_size).to(next(model.parameters()).device, dtype=next(model.parameters()).dtype)
+    was_training = model.training # save training mode
     model.eval()
     profile_result = profile(model, inputs=(dummy,), verbose=False)
+    if was_training:
+        model.train()
     if len(profile_result) == 2:
         flops, _ = profile_result
     else:
         flops, _, _ = profile_result
-    macs = flops / 2
-    # compute scores
+    macs = flops
+    
+    # compute scores and return
     param_score = (1 - (p_s + p_u)) * (q_w / 32) * w / 5.6e6
-    ops_score = (1 - p_s) * (q_a / 32) * macs / 2.8e8
+    ops_score = (1 - p_s) * (max(q_w, q_a) / 32) * macs / 2.8e8
+    print(f"Parameters: {w} | MACs: {macs:.2e} | "
+          f"Pruning Ratio (unstruct): {p_u:.2f} | "
+          f"Pruning Ratio (struct): {p_s:.2f} | "
+          f"Bitwidth (weights): {q_w} | Bitwidth (activations): {q_a} | "
+    print(f"Score (params): {param_score:.4f} | "
+          f"Score (ops): {ops_score:.4f}")
+    print(f"Efficiency Score (total): {param_score + ops_score:.4f}")
     return param_score + ops_score
 
 if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     net = ResNet18().to(device)
+    # Convert model to half precision
+    net = net.half()
+    # test compute_score function for half precision
+    score = compute_score(net)
+    print(f"Efficiency score (half precision): {score:.4f}")
+    exit(0)
+
+    trainloader, testloader = load_dataset()
+
     optimizer = optim.Adam(net.parameters(), lr=0.001)
     scheduler = StepLR(optimizer, step_size=20, gamma=0.5)
-    train(net, trainloader, testloader, optimizer, scheduler, device, epochs=20)
-    save_model(net, 'resnet18_cifar10_20.pth')
+    epochs = 20
+    train(net, trainloader, testloader, optimizer, scheduler, device, epochs=epochs)
+    # Automatic model save name
+    save_path = f"./pretrained/resnet18_e{epochs}.pth"
+    save_model(net, save_path)
     prune_ratios = [0.0, 0.2, 0.4, 0.6, 0.8]
     prune_and_evaluate(net, testloader, device, prune_ratios)
