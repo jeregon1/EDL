@@ -251,7 +251,7 @@ def compute_score(model, input_size=(1,3,32,32), q_w=None, q_a=None):
     print(f"Parameters: {w} | MACs: {macs:.2e} | "
           f"Pruning Ratio (unstruct): {p_u:.2f} | "
           f"Pruning Ratio (struct): {p_s:.2f} | "
-          f"Bitwidth (weights): {q_w} | Bitwidth (activations): {q_a} | "
+          f"Bitwidth (weights): {q_w} | Bitwidth (activations): {q_a}")
     print(f"Score (params): {param_score:.4f} | "
           f"Score (ops): {ops_score:.4f}")
     print(f"Efficiency Score (total): {param_score + ops_score:.4f}")
@@ -265,8 +265,6 @@ if __name__ == "__main__":
     # test compute_score function for half precision
     score = compute_score(net)
     print(f"Efficiency score (half precision): {score:.4f}")
-    exit(0)
-
     trainloader, testloader = load_dataset()
 
     optimizer = optim.Adam(net.parameters(), lr=0.001)
