@@ -1,3 +1,4 @@
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -87,7 +88,7 @@ def load_dataset():
         normalize,
     ])
 
-    rootdir = './effdl-cifar10/'
+    rootdir = '/opt/img/effdl-cifar10/'
     c10train = torchvision.datasets.CIFAR10(rootdir, train=True, download=True, transform=transform_train)
     c10test = torchvision.datasets.CIFAR10(rootdir, train=False, download=True, transform=transform_test)
     trainloader = DataLoader(c10train, batch_size=32, shuffle=True)
@@ -102,7 +103,8 @@ def evaluate(net, dataloader, device):
     criterion = nn.CrossEntropyLoss()
     with torch.no_grad():
         for images, labels in dataloader:
-            images, labels = images.to(device), labels.to(device)
+            images = images.to(device)
+            labels = labels.to(device)
             outputs = net(images)
             loss = criterion(outputs, labels)
             test_loss += loss.item()
@@ -148,13 +150,14 @@ def compute_score(model, input_size=(1,3,32,32), q_w=None, q_a=None):
 
 # ========== Training ==========
 
-def train(model, trainloader, testloader, optimizer, scheduler, device, epochs=10):
+def train(model, trainloader, testloader, optimizer, scheduler, device, epochs=10) :
     criterion = nn.CrossEntropyLoss()
 
     for epoch in range(epochs):
         model.train()
         for inputs, labels in trainloader:
-            inputs, labels = inputs.to(device), labels.to(device)
+            inputs = inputs.to(device)
+            labels = labels.to(device)
             optimizer.zero_grad()
             outputs = model(inputs)
             loss = criterion(outputs, labels)
@@ -185,7 +188,7 @@ def prune_and_evaluate(model, dataloader, device, ratios):
 
 if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    net = ResNet18().to(device).half()
+    net = ResNet18().to(device)
 
     trainloader, testloader = load_dataset()
     optimizer = optim.Adam(net.parameters(), lr=0.001)
