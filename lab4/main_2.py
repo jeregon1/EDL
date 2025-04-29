@@ -161,11 +161,15 @@ def compute_score(model, q_w=None, q_a=None):
 
 # ========== Training ==========
 
-def train(model, trainloader, testloader, optimizer, scheduler, device, epochs=10) :
+def train(model, trainloader, testloader, optimizer, scheduler, device, epochs=10):
     criterion = nn.CrossEntropyLoss()
+    train_losses = []
+    test_losses = []
+    test_accuracies = []
 
     for epoch in range(epochs):
         model.train()
+        running_loss = 0.0
         for inputs, labels in trainloader:
             inputs = inputs.to(device)
             labels = labels.to(device)
@@ -174,11 +178,20 @@ def train(model, trainloader, testloader, optimizer, scheduler, device, epochs=1
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
+            running_loss += loss.item()
 
+        train_loss = running_loss / len(trainloader)
         test_loss, test_acc = evaluate(model, testloader, device)
         scheduler.step()
 
-        print(f"[Epoch {epoch+1}] Test Loss: {test_loss:.4f} | Test Acc: {test_acc:.2f}%")
+        train_losses.append(train_loss)
+        test_losses.append(test_loss)
+        test_accuracies.append(test_acc)
+
+        print(f"[Epoch {epoch+1}] Train Loss: {train_loss:.4f} | Test Loss: {test_loss:.4f} | Test Acc: {test_acc:.2f}%")
+
+    return train_losses, test_losses, test_accuracies
+
 
 # ========== Pruning ==========
 
@@ -205,9 +218,9 @@ if __name__ == "__main__":
     trainloader, testloader = load_dataset()
     optimizer = optim.Adam(net.parameters(), lr=0.001)
     scheduler = StepLR(optimizer, step_size=20, gamma=0.5)
-    epochs = 5
+    epochs = 20
 
-    train(net, trainloader, testloader, optimizer, scheduler, device, epochs=epochs)
+    train_losses, test_losses, test_accuracies = train(net, trainloader, testloader, optimizer, scheduler, device, epochs=epochs)
 
     # Baseline
     baseline_loss, baseline_acc = evaluate(net, testloader, device)
@@ -236,6 +249,30 @@ if __name__ == "__main__":
     scores = [arch['score'] for arch in architectures]
     accuracies = [arch['acc'] for arch in architectures]
     labels = [arch['name'] for arch in architectures]
+    
+    # === Courbe de la loss ===
+    plt.figure(figsize=(10, 6))
+    plt.plot(train_losses, label='Train Loss')
+    plt.plot(test_losses, label='Test Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Loss Evolution')
+    plt.legend()
+    plt.grid()
+    plt.savefig("loss_evolution.png", dpi=300)
+    plt.show()
+
+    # === Courbe de l'accuracy ===
+    plt.figure(figsize=(10, 6))
+    plt.plot(test_accuracies, label='Test Accuracy (%)')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy (%)')
+    plt.title('Accuracy Evolution')
+    plt.grid()
+    plt.legend()
+    plt.savefig("accuracy_evolution.png", dpi=300)
+    plt.show()
+
 
     plt.figure(figsize=(10, 6))
     plt.scatter(scores, accuracies)
