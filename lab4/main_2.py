@@ -114,11 +114,15 @@ def evaluate(net, dataloader, device):
     acc = 100. * correct / total
     return test_loss / len(dataloader), acc
 
-def compute_score(model, input_size=(1,3,32,32), q_w=None, q_a=None):
+
+def compute_score(model, q_w=None, q_a=None):
+    """Compute a simplified efficiency score without thop."""
+    # Nombre de paramètres
     w = sum(p.numel() for p in model.parameters())
     zero_w = sum(int((p == 0).sum()) for p in model.parameters())
     p_u = zero_w / w
 
+    # Pruning structuré
     total_filters, zero_filters = 0, 0
     for m in model.modules():
         if isinstance(m, (nn.Conv2d, nn.Linear)):
@@ -129,24 +133,31 @@ def compute_score(model, input_size=(1,3,32,32), q_w=None, q_a=None):
             total_filters += sums.numel()
     p_s = zero_filters / total_filters if total_filters > 0 else 0
 
+    # Bitwidth
     bits = torch.finfo(next(model.parameters()).dtype).bits
     if q_w is None:
         q_w = bits
     if q_a is None:
         q_a = bits
 
-    from thop import profile
-    dummy = torch.randn(input_size).to(next(model.parameters()).device, dtype=next(model.parameters()).dtype)
-    was_training = model.training
-    model.eval()
-    flops, _ = profile(model, inputs=(dummy,), verbose=False)
-    if was_training:
-        model.train()
-    macs = flops
-
+    # Simplified Score = based on only parameters
     param_score = (1 - (p_s + p_u)) * (q_w / 32) * w / 5.6e6
-    ops_score = (1 - p_s) * (max(q_w, q_a) / 32) * macs / 2.8e8
-    return param_score + ops_score
+
+    # No ops_score (no macs/flops estimation)
+    ops_score = 0
+
+    total_score = param_score + ops_score
+
+    print(f"Parameters: {w} | "
+          f"Pruning Ratio (unstructured): {p_u:.2f} | "
+          f"Pruning Ratio (structured): {p_s:.2f} | "
+          f"Bitwidth: {q_w}")
+
+    print(f"Score (params only): {param_score:.4f}")
+    print(f"Efficiency Score (total): {total_score:.4f}")
+
+    return total_score
+
 
 # ========== Training ==========
 
@@ -187,13 +198,14 @@ def prune_and_evaluate(model, dataloader, device, ratios):
 # ========== Main ==========
 
 if __name__ == "__main__":
+    
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     net = ResNet18().to(device)
 
     trainloader, testloader = load_dataset()
     optimizer = optim.Adam(net.parameters(), lr=0.001)
     scheduler = StepLR(optimizer, step_size=20, gamma=0.5)
-    epochs = 20
+    epochs = 5
 
     train(net, trainloader, testloader, optimizer, scheduler, device, epochs=epochs)
 
@@ -207,23 +219,17 @@ if __name__ == "__main__":
     prune_results = prune_and_evaluate(net, testloader, device, prune_ratios)
 
     # Quantized
-    net_quantized = quantize_dynamic(net, {nn.Linear}, dtype=torch.qint8)
-    quantized_loss, quantized_acc = evaluate(net_quantized, testloader, device)
+    net_cpu = net.to('cpu')  # Quantization must happen on CPU
+    net_quantized = quantize_dynamic(net_cpu, {nn.Linear}, dtype=torch.qint8)
+    quantized_loss, quantized_acc = evaluate(net_quantized, testloader, device='cpu')
     quantized_score = compute_score(net_quantized)
     print(f"Quantized model | Acc: {quantized_acc:.2f}% | Score: {quantized_score:.4f}")
 
-    # Pruned+Quantized
-    net_pruned_q = quantize_dynamic(net, {nn.Linear}, dtype=torch.qint8)
-    pruned_quantized_loss, pruned_quantized_acc = evaluate(net_pruned_q, testloader, device)
-    pruned_quantized_score = compute_score(net_pruned_q)
-    print(f"Pruned+Quantized model | Acc: {pruned_quantized_acc:.2f}% | Score: {pruned_quantized_score:.4f}")
-
-    # Résumé
+    # Résumé (PAS de Pruned+Quantized)
     architectures = [
         {'name': 'Baseline', 'score': baseline_score, 'acc': baseline_acc},
         *prune_results,
         {'name': 'Quantized', 'score': quantized_score, 'acc': quantized_acc},
-        {'name': 'Pruned+Quantized', 'score': pruned_quantized_score, 'acc': pruned_quantized_acc},
     ]
 
     # Plot
@@ -241,5 +247,6 @@ if __name__ == "__main__":
     plt.title('Accuracy vs Efficiency Score')
     plt.grid()
     plt.legend()
-    plt.show()
+    plt.savefig("accuracy_vs_score.png", dpi=300)
+
 
