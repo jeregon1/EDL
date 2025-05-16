@@ -1,4 +1,3 @@
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -103,8 +102,7 @@ def evaluate(net, dataloader, device):
     criterion = nn.CrossEntropyLoss()
     with torch.no_grad():
         for images, labels in dataloader:
-            images = images.to(device)
-            labels = labels.to(device)
+            images, labels = images.to(device), labels.to(device)
             outputs = net(images)
             loss = criterion(outputs, labels)
             test_loss += loss.item()
@@ -171,8 +169,7 @@ def train(model, trainloader, testloader, optimizer, scheduler, device, epochs=1
         model.train()
         running_loss = 0.0
         for inputs, labels in trainloader:
-            inputs = inputs.to(device)
-            labels = labels.to(device)
+            inputs, labels = inputs.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = model(inputs)
             loss = criterion(outputs, labels)
