@@ -100,12 +100,12 @@ def train_student(teacher_path="models/teacher_resnet50_96.00acc.pth",
             inputs, labels = inputs.to(device), labels.to(device)
 
             with torch.no_grad():
-                with autocast():
+                with autocast(device_type='cuda'):
                     teacher_outputs = teacher(inputs)
 
             optimizer.zero_grad()
 
-            with autocast():
+            with autocast(device_type='cuda'):
                 student_outputs = student(inputs)
                 loss = distillation_loss(student_outputs, teacher_outputs, labels, T=T, alpha=alpha)
 
