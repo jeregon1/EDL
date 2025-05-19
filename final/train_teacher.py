@@ -49,6 +49,7 @@ def train_teacher(acc_target=96.0, max_epochs=200, batch_size=128, lr=0.1, momen
                             num_workers=num_workers, pin_memory=pin_memory)
 
     model = ResNet50(groups=1).to(device)
+    
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1).to(device)
     optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
     scheduler = CosineAnnealingLR(optimizer, T_max=max_epochs)
