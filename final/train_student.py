@@ -10,15 +10,16 @@ from utils import evaluate
 import pandas as pd
 import os
 
+
 def distillation_loss(student_logits, teacher_logits, true_labels, T=4.0, alpha=0.7):
     """
-    Distillation loss: KL divergence + cross-entropy
+    Distillation loss: KL divergence (soft labels) + CrossEntropy (hard labels)
     """
     soft_loss = nn.KLDivLoss(reduction="batchmean")(
         nn.functional.log_softmax(student_logits / T, dim=1),
         nn.functional.softmax(teacher_logits / T, dim=1)
     ) * (T * T)
-    
+
     hard_loss = nn.CrossEntropyLoss()(student_logits, true_labels)
 
     return alpha * soft_loss + (1 - alpha) * hard_loss
@@ -27,14 +28,15 @@ def distillation_loss(student_logits, teacher_logits, true_labels, T=4.0, alpha=
 def train_student(teacher_path="models/teacher_resnet50_96.00acc.pth",
                   acc_target=91.0, max_epochs=150, batch_size=128, lr=0.1,
                   momentum=0.9, weight_decay=5e-4, warmup_epochs=5,
-                  T=4.0, alpha=0.7, log_path="log_student.csv"):
+                  T=4.0, alpha=0.7, patience=10,
+                  log_path="log_student.csv"):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Data loading
+    # Transforms
     normalize = transforms.Normalize((0.4914, 0.4822, 0.4465),
                                      (0.2023, 0.1994, 0.2010))
-    
+
     train_transform = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
@@ -49,10 +51,10 @@ def train_student(teacher_path="models/teacher_resnet50_96.00acc.pth",
     ])
 
     rootdir = '/opt/img/effdl-cifar10/'
-
     if not os.path.exists(rootdir):
         rootdir = './effdl-cifar10/'
 
+    # Datasets and loaders
     trainset = datasets.CIFAR10(rootdir, train=True, download=True, transform=train_transform)
     testset = datasets.CIFAR10(rootdir, train=False, download=True, transform=test_transform)
 
@@ -67,8 +69,8 @@ def train_student(teacher_path="models/teacher_resnet50_96.00acc.pth",
 
     student = ResNet18(groups=1).to(device)
 
+    # Optim & schedulers
     optimizer = optim.SGD(student.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
-
     scheduler = SequentialLR(optimizer,
         schedulers=[
             LinearLR(optimizer, start_factor=1e-3, end_factor=1.0, total_iters=warmup_epochs),
@@ -77,9 +79,10 @@ def train_student(teacher_path="models/teacher_resnet50_96.00acc.pth",
         milestones=[warmup_epochs]
     )
 
-    scaler = GradScaler(device_type='cuda')
+    scaler = GradScaler()
     best_acc = 0.0
     best_state = None
+    epochs_since_improvement = 0
 
     log = {
         "epoch": [],
@@ -90,22 +93,19 @@ def train_student(teacher_path="models/teacher_resnet50_96.00acc.pth",
     }
 
     for epoch in range(1, max_epochs + 1):
-
         student.train()
         total, correct = 0, 0
 
         for inputs, labels in trainloader:
             inputs, labels = inputs.to(device), labels.to(device)
 
-            with torch.no_grad() :
-            
-                with autocast(device_type='cuda') :
+            with torch.no_grad():
+                with autocast():
                     teacher_outputs = teacher(inputs)
 
             optimizer.zero_grad()
 
-            with autocast(device_type='cuda'):
-            
+            with autocast():
                 student_outputs = student(inputs)
                 loss = distillation_loss(student_outputs, teacher_outputs, labels, T=T, alpha=alpha)
 
@@ -132,20 +132,29 @@ def train_student(teacher_path="models/teacher_resnet50_96.00acc.pth",
         if test_acc > best_acc:
             best_acc = test_acc
             best_state = student.state_dict().copy()
+            epochs_since_improvement = 0
+        else:
+            epochs_since_improvement += 1
 
         if test_acc >= acc_target:
             print(f"[*] Student reached {acc_target}% test accuracy at epoch {epoch}")
             break
 
+        if epochs_since_improvement >= patience:
+            print(f"[!] Early stopping: no improvement for {patience} epochs (Best Acc: {best_acc:.2f}%)")
+            break
+
         scheduler.step()
 
+    # Save log and best model
     pd.DataFrame(log).to_csv(log_path, index=False)
     print(f"[+] Training finished. Best Acc: {best_acc:.2f}%. Log saved to {log_path}.")
 
-    if best_state :
+    if best_state:
         os.makedirs("models", exist_ok=True)
         torch.save(best_state, "models/student_resnet18_best.pth")
         print(f"[+] Best model saved to models/student_resnet18_best.pth")
+
 
 if __name__ == "__main__":
     train_student()
