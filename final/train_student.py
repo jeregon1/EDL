@@ -23,7 +23,7 @@ def distillation_loss (student_logits, teacher_logits, true_labels, T=4.0, alpha
     return alpha * soft_loss + (1 - alpha) * hard_loss
 
 
-def train_student (teacher_path="models/teacher_resnet50_95.75acc.pth", acc_target=91.0, max_epochs=150, batch_size=128, lr=0.1, momentum=0.9, weight_decay=5e-4, warmup_epochs=5, T=4.0, alpha=0.7, log_path="log_student.csv") :
+def train_student (teacher_path="models/teacher_resnet50_96.00acc.pth", acc_target=91.0, max_epochs=150, batch_size=128, lr=0.1, momentum=0.9, weight_decay=5e-4, warmup_epochs=5, T=4.0, alpha=0.7, log_path="log_student.csv") :
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
