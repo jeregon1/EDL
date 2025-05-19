@@ -81,7 +81,7 @@ def train_teacher(acc_target=96.0, max_epochs=200, batch_size=128, lr=0.1,
         if test_acc > best_acc:
             best_acc = test_acc
             if best_acc >= acc_target/2:
-                torch.save(model.state_dict(), f"teacher_resnet50_{best_acc:.2f}acc.pth")
+                torch.save(model.state_dict(), f"models/teacher_resnet50_{best_acc:.2f}acc.pth")
         if test_acc >= acc_target:
             print(f"Reached target accuracy {acc_target}% at epoch {epoch}.")
             break
