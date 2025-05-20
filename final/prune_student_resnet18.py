@@ -17,7 +17,7 @@ _, testloader = load_dataset(batch_size=128)
 ratios = [0.2, 0.4, 0.6]
 
 # Fichier de log spécifique ResNet18
-logfile = "log/prune_resnet.csv"
+logfile = "logs/prune_resnet.csv"
 
 # Exécution
 prune_and_evaluate(model, dataloader=testloader, device=device, ratios=ratios, logfile=logfile)
